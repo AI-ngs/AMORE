@@ -4,16 +4,22 @@ from selenium.webdriver.chrome.options import Options
 import time
 
 
-def crawl_brand_reviews(brand_url, max_pages=10):
+def crawl_reviews_by_product(max_pages=5):
     """
-    brand_url : 브랜드 리뷰 기본 URL
-    max_pages : 몇 페이지까지 수집할지 (1페이지당 약 20개 리뷰)
+    return:
+    {
+        "상품명A": [리뷰1, 리뷰2, ...],
+        "상품명B": [...]
+    }
     """
+
+    brand_url = "https://www.cosme.net/brands/7623/review/"
 
     options = Options()
     options.add_argument("--headless")
     options.add_argument("--disable-gpu")
     options.add_argument("--no-sandbox")
+    options.add_argument("--window-size=1920,1080")
 
     driver = webdriver.Chrome(options=options)
 
@@ -29,7 +35,7 @@ def crawl_brand_reviews(brand_url, max_pages=10):
         review_blocks = driver.find_elements(By.CSS_SELECTOR, "div.reviewInformation")
         print(f"DEBUG: {page}페이지 리뷰 블록 수 = {len(review_blocks)}")
 
-        # 리뷰가 없으면 더 이상 페이지 없음
+        # 리뷰 없으면 종료
         if len(review_blocks) == 0:
             print("⚠️ 더 이상 리뷰 없음 → 종료")
             break
@@ -49,28 +55,12 @@ def crawl_brand_reviews(brand_url, max_pages=10):
                     By.CSS_SELECTOR, "div.productInformation h3 a"
                 ).text.strip()
 
-                if product_name not in product_reviews:
-                    product_reviews[product_name] = []
-
-                product_reviews[product_name].append(review_text)
+                product_reviews.setdefault(product_name, []).append(review_text)
 
             except Exception as e:
                 print("[WARN] 리뷰 파싱 실패:", e)
                 continue
 
     driver.quit()
+    print(f"\nDEBUG: 가져온 상품 수 = {len(product_reviews)}")
     return product_reviews
-
-
-# 단독 실행 테스트용
-if __name__ == "__main__":
-    reviews = crawl_brand_reviews(
-        "https://www.cosme.net/brands/7623/review/",
-        max_pages=5
-    )
-
-    print("\n===== 수집 결과 =====")
-    for product, revs in reviews.items():
-        print(f"{product}: {len(revs)}개 리뷰")
-        if revs:
-            print("샘플:", revs[0][:80], "...")

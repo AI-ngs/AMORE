@@ -1,133 +1,82 @@
-from collections import Counter
-from sudachipy import dictionary, tokenizer
-import re
+from openai import OpenAI
+import json
+import os
 
-# ===============================
-# 형태소 분석기
-# ===============================
-tokenizer_obj = dictionary.Dictionary().create()
-mode = tokenizer.Tokenizer.SplitMode.C
+# 🔐 API KEY 로드
+def load_api_keys(filepath="api_key2.txt"):
+    with open(filepath, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line and "=" in line:
+                key, value = line.split("=", 1)
+                os.environ[key.strip()] = value.strip()
 
-# ===============================
-# 감성 단어 (총평용)
-# ===============================
-POSITIVE_WORDS = ["良い", "好き", "満足", "おすすめ", "良かった"]
-NEGATIVE_WORDS = ["悪い", "不満", "微妙", "合わない"]
+path = '/Users/User/Desktop/'
+# API 키 로드 및 환경변수 설정
+load_api_keys(path + 'api_key2.txt')
 
-# ===============================
-# 🔥 강화된 불용어
-# ===============================
-STOPWORDS = set([
-    "する", "ある", "いる", "なる", "思う",
-    "これ", "それ", "ため", "ところ", "よう",
-    "感じ", "方", "商品", "使用", "購入",
-    "今回", "他", "自分", "私", "もの", "場合",
-    "現品", "場所", "効果", "関連", "ワード",
-    "記事", "紹介", "内容", "情報", "写真",
-    "ページ", "レビュー", "投稿", "評価",
-    "全体", "印象", "意味", "理由", "結果",
-    "とても", "かなり", "少し", "ちょっと"
-])
+client = OpenAI()
 
-# ===============================
-# 속성 + 대표 키워드
-# ===============================
-ASPECT_ANCHORS = {
-    "보습력": ["保湿"],
-    "발림성": ["伸び"],
-    "지속력": ["持続"],
-    "향": ["香り"],
-    "색": ["色"],
-}
+def analyze_reviews_with_llm(product_name, reviews):
+    """
+    product_name: str
+    reviews: List[str]
+    """
 
-# ===============================
-# 문장 분리 함수 (일본어 기준)
-# ===============================
-def split_sentences(text):
-    sentences = re.split(r"[。！？]", text)
-    return [s.strip() for s in sentences if len(s.strip()) > 0]
+    # 리뷰 너무 많으면 비용/속도 문제 → 샘플링
+    reviews = reviews[:100]
 
-# ===============================
-# 리뷰 감성 판별 (총평용)
-# ===============================
-def get_review_sentiment(text):
-    score = 0
-    for p in POSITIVE_WORDS:
-        if p in text:
-            score += 1
-    for n in NEGATIVE_WORDS:
-        if n in text:
-            score -= 1
+    prompt = f"""
+당신은 화장품 리뷰 분석 전문가입니다.
 
-    if score > 0:
-        return "positive"
-    elif score < 0:
-        return "negative"
-    return "neutral"
+다음은 하나의 화장품에 대한 리뷰 목록입니다.
+리뷰를 분석해서 아래 형식의 JSON으로 결과를 만들어주세요.
 
-# ===============================
-# 🔥 메인 분석 함수
-# ===============================
-def analyze_reviews(texts, top_n=5):
-    # ---------------------------
-    # 1️⃣ 총평 감성 비율
-    # ---------------------------
-    sentiment_cnt = {"positive": 0, "neutral": 0, "negative": 0}
+[분석 기준]
+- 속성: 보습력, 향, 지속력, 발림성 (리뷰에 등장한 것만 사용)
+- 각 속성마다 긍정/부정 건수 계산
+- 속성별 특징 요약 문장 작성
+- 전체 리뷰 기준 총평 비율 계산
+- 강점 / 개선 포인트 자연어 요약
 
-    for text in texts:
-        sentiment_cnt[get_review_sentiment(text)] += 1
+[출력 형식(JSON만)]
+{{
+  "attributes": {{
+    "보습력": {{
+      "positive": 45,
+      "negative": 5,
+      "summary": "촉촉하다, 보습이 좋다는 리뷰가 많았고 간혹 건조하다는 평이 있음"
+    }}
+  }},
+  "overall": {{
+    "positive": 63,
+    "neutral": 12,
+    "negative": 25
+  }},
+  "strengths": "보습력과 지속력에 대해 긍정적인 평가가 많아 건성 피부 사용자에게 적합함",
+  "weaknesses": "향에 대한 호불호가 크며 특히 곰팡이향에 대한 부정적 리뷰가 다수 존재함"
+}}
 
-    total = sum(sentiment_cnt.values()) or 1
+[제품명]
+{product_name}
 
-    sentiment_ratio = {
-        "긍정": round(sentiment_cnt["positive"] / total * 100, 1),
-        "중립": round(sentiment_cnt["neutral"] / total * 100, 1),
-        "부정": round(sentiment_cnt["negative"] / total * 100, 1),
-    }
+[리뷰 목록]
+{chr(10).join(reviews)}
+"""
 
-    # ---------------------------
-    # 2️⃣ 문장 단위 속성 분석
-    # ---------------------------
-    aspect_analysis = {}
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3
+    )
 
-    for aspect, anchors in ASPECT_ANCHORS.items():
-        mention_count = 0
-        word_counter = Counter()
+    content = response.choices[0].message.content
 
-        for text in texts:
-            sentences = split_sentences(text)
-
-            for sentence in sentences:
-                if not any(anchor in sentence for anchor in anchors):
-                    continue
-
-                mention_count += 1
-
-                for token in tokenizer_obj.tokenize(sentence, mode):
-                    pos = token.part_of_speech()[0]
-                    base = token.dictionary_form()
-
-                    if pos not in ["名詞", "形容詞"]:
-                        continue
-                    if base in STOPWORDS:
-                        continue
-                    if len(base) <= 1:
-                        continue
-
-                    word_counter[base] += 1
-
-        if mention_count > 0:
-            aspect_analysis[aspect] = {
-                "언급_건수": mention_count,
-                "확장_표현_TOP": word_counter.most_common(top_n)
-            }
-
-    # ---------------------------
-    # 3️⃣ 파이프라인 호환 반환
-    # ---------------------------
-    return {
-        "positive_keywords": {},
-        "negative_keywords": {},
-        "sentiment_ratio": sentiment_ratio,
-        "aspect_analysis": aspect_analysis
-    }
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        print("❌ JSON 파싱 실패")
+        print(content)
+        return None

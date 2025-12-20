@@ -1,58 +1,41 @@
-from cosme_crawler import crawl_brand_reviews
-from cosme_analyzer import analyze_reviews
+from cosme_crawler import crawl_reviews_by_product
+from cosme_analyzer import analyze_reviews_with_llm
 
-def run_pipeline(brand_url):
-    all_product_reviews = crawl_brand_reviews(brand_url)
-    print("가져온 상품 수:", len(all_product_reviews))
+def run_pipeline():
+    print("🚀 파이프라인 실행 시작")
 
-    final_results = {}
+    product_reviews = crawl_reviews_by_product()
 
-    for product_name, reviews in all_product_reviews.items():
-        if not reviews:
+    for product_name, reviews in product_reviews.items():
+        print("\n" + "=" * 50)
+        print(f"🧴 제품명: {product_name}")
+
+        result = analyze_reviews_with_llm(product_name, reviews)
+
+        if not result:
+            print("❌ 분석 실패")
             continue
 
-        analysis = analyze_reviews(reviews)
-        final_results[product_name] = analysis
+        # 속성별 출력
+        for attr, data in result["attributes"].items():
+            print(f"\n{attr}")
+            print(f"- 긍정: {data['positive']}건")
+            print(f"- 부정: {data['negative']}건")
+            print(f"- {data['summary']}")
 
-    return final_results
+        # 총평
+        overall = result["overall"]
+        print("\n총평:")
+        print(f"- 긍정 {overall['positive']}%")
+        print(f"- 중립 {overall['neutral']}%")
+        print(f"- 부정 {overall['negative']}%")
 
+        # 강점 / 개선
+        print("\n강점")
+        print(f"- {result['strengths']}")
+
+        print("\n개선 포인트")
+        print(f"- {result['weaknesses']}")
 
 if __name__ == "__main__":
-    print("🔥 pipeline 실행 시작\n")
-
-    results = run_pipeline(
-        brand_url="https://www.cosme.net/brands/7623/review/"
-    )
-
-    for product, analysis in results.items():
-        print(f"🧴 상품명: {product}")
-
-        aspect_analysis = analysis.get("aspect_analysis", {})
-
-        # =========================
-        # 속성 분석 출력
-        # =========================
-        if aspect_analysis:
-            for aspect, info in aspect_analysis.items():
-                print(f"\n{aspect}:")
-                print(f"- 언급 건수: {info['언급_건수']}")
-
-                words = [w for w, _ in info["확장_표현_TOP"]]
-                if words:
-                    print(f"- 확장 표현: {', '.join(words)}")
-                else:
-                    print("- 확장 표현: 없음")
-        else:
-            print("\n속성 기반 분석 데이터가 충분하지 않습니다.")
-
-        # =========================
-        # 🔥 총평은 항상 출력
-        # =========================
-        s = analysis["sentiment_ratio"]
-        print(
-            f"\n총평: 긍정({s['긍정']}%) "
-            f"중립({s['중립']}%) "
-            f"부정({s['부정']}%)"
-        )
-
-        print("\n" + "-" * 50 + "\n")
+    run_pipeline()
