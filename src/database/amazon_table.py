@@ -1,3 +1,7 @@
+# src/database/cosme_table.py
+# amazon 테이블에 CSV 데이터를 적재하는 스크립트
+# 기존에 있던 amazon 테이블을 삭제하고, output/amazon 폴더의 모든 CSV 파일을 읽어와서 amazon 테이블에 적재함
+
 import sqlite3
 from pathlib import Path
 import pandas as pd
