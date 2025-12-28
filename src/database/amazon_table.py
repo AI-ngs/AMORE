@@ -7,7 +7,7 @@ import pandas as pd
 # 경로 설정
 # =========================
 BASE_DIR = Path(__file__).resolve().parents[2]  # AMORE
-OUTPUT_DIR = BASE_DIR / "output"
+OUTPUT_DIR = BASE_DIR / "output" / "amazon"
 DB_PATH = BASE_DIR / "laneige.db"
 
 
@@ -19,32 +19,36 @@ def save_csvs_to_sqlite():
     print(f"[INFO] CSV 폴더: {OUTPUT_DIR}")
 
     csv_files = list(OUTPUT_DIR.glob("*.csv"))
-
     if not csv_files:
         print("[WARN] CSV 파일이 없습니다.")
         return
 
     conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
 
+    # 기존 테이블 삭제
+    print("[INFO] 기존 amazon 테이블 삭제")
+    cursor.execute("DROP TABLE IF EXISTS amazon")
+    conn.commit()
+
+    # CSV → DB
     for csv_file in csv_files:
         print(f"[LOAD] {csv_file.name}")
-
         df = pd.read_csv(csv_file)
 
-        # 핵심: 하나의 테이블에 계속 데이터 append
         df.to_sql(
-            name="cosme",
+            name="amazon",
             con=conn,
-            if_exists="append",   # ← 누적
+            if_exists="append",
             index=False
         )
 
     conn.close()
-    print("[DONE] 모든 CSV 저장 완료")
+    print("[DONE] cosme 테이블 재생성 및 CSV 적재 완료")
 
 
 # =========================
-# 실행 진입점
+# 실행
 # =========================
 if __name__ == "__main__":
     save_csvs_to_sqlite()
