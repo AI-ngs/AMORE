@@ -4,63 +4,82 @@ from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.options import Options
 from datetime import datetime, timedelta
-from collections import defaultdict
 import time
 import re
 
-BASE_URL = "https://www.cosme.net/brands/7623/review/"
+def parse_cosme_date(text):
+    m = re.search(r"(\d{4}/\d{1,2}/\d{1,2})", text)
+    return datetime.strptime(m.group(1), "%Y/%m/%d") if m else None
 
-def parse_cosme_date(date_text):
-    # '2024/12/23' 또는 '2024/5/2' 같은 형식을 찾습니다.
-    match = re.search(r"(\d{4}/\d{1,2}/\d{1,2})", date_text)
-    if match:
-        return datetime.strptime(match.group(1), "%Y/%m/%d")
-    return None
+def crawl_by_id(product_id, days=None, max_pages=5):
+    reviews = []
 
-def crawl_laneige_reviews(days=None, max_pages=5):
-    product_reviews = defaultdict(list)
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--window-size=1920,1080")
-    
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    options = Options()
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--lang=ja-JP")
+    options.add_argument(
+        "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36"
+    )
 
-    for page in range(1, max_pages + 1):
-        url = f"{BASE_URL}?page={page}"
-        print(f"📄 @COSME {page}페이지 수집 시작...")
-        driver.get(url)
-        time.sleep(3)
+    driver = webdriver.Chrome(
+        service=Service(ChromeDriverManager().install()),
+        options=options
+    )
 
-        # 원본 코드의 리뷰 블록 선택자
-        review_items = driver.find_elements(By.CSS_SELECTOR, "div.reviewInformation")
-        
-        if not review_items:
-            print("🔎 리뷰 블록을 찾을 수 없어 종료합니다.")
-            break
+    base_url = f"https://www.cosme.net/products/{product_id}/review/"
 
-        for item in review_items:
-            try:
-                # [중요 수정] 날짜 태그를 p.reviewDate로 변경
+    try:
+        for page in range(1, max_pages + 1):
+            driver.get(f"{base_url}?page={page}")
+            time.sleep(3)
+
+            # 사람처럼 스크롤
+            height = driver.execute_script("return document.body.scrollHeight")
+            for y in range(0, height, 300):
+                driver.execute_script(f"window.scrollTo(0, {y});")
+                time.sleep(0.15)
+
+            items = driver.find_elements(By.CSS_SELECTOR, "div.review-sec")
+            if not items:
+                break
+
+            page_count = 0
+
+            for item in items:
                 try:
-                    date_text = item.find_element(By.CSS_SELECTOR, "p.reviewDate").text
-                    review_date = parse_cosme_date(date_text)
+                    # ✅ 날짜 (모바일 / PC 분기)
+                    r_date = None
+                    try:
+                        date_text = item.find_element(
+                            By.CSS_SELECTOR, "p.mobile-date"
+                        ).text
+                        r_date = parse_cosme_date(date_text)
+                    except:
+                        try:
+                            date_text = item.find_element(
+                                By.CSS_SELECTOR, "p.date"
+                            ).text
+                            r_date = parse_cosme_date(date_text)
+                        except:
+                            pass  # 날짜 없음 허용
+
+                    if days and r_date:
+                        if r_date < datetime.now() - timedelta(days=days):
+                            return reviews
+
+                    # ✅ 리뷰 본문
+                    text = item.find_element(By.CSS_SELECTOR, "p.read").text.strip()
+                    if text:
+                        reviews.append(text)
+                        page_count += 1
+
                 except:
-                    # 날짜 태그가 없거나 다를 경우를 대비
-                    review_date = None
+                    continue
 
-                # 기간 필터링 로직
-                if days is not None and review_date:
-                    if review_date < datetime.now() - timedelta(days=days):
-                        continue # 설정 기간보다 오래된 리뷰면 건너뜀
+            print(f"   - {page}페이지 완료 ({page_count}건 / 누적 {len(reviews)}건)")
 
-                # 제품명 및 리뷰 텍스트 (원본 로직 유지)
-                product_name = item.find_element(By.CSS_SELECTOR, "h3 a").text.strip()
-                review_text = item.find_element(By.CSS_SELECTOR, "div.reviewTxt").text.strip()
+    finally:
+        driver.quit()
 
-                if product_name and review_text:
-                    product_reviews[product_name].append(review_text)
-            except Exception as e:
-                continue
-
-    driver.quit()
-    return product_reviews
+    return reviews

@@ -1,116 +1,163 @@
 import csv
 import os
-from collections import defaultdict
 from datetime import datetime, timedelta
-
 import cosme_crawler
 from unified_analyzer import analyze_reviews
 
 
 # =========================
-# 날짜 파싱 (Amazon용)
+# @COSME 제품 정보 로드
 # =========================
-def parse_amazon_date(date_str):
-    """
-    지원 형식:
-    - 19-Dec-25
-    - 2024-12-19
-    """
-    for fmt in ("%d-%b-%y", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(date_str, fmt)
-        except ValueError:
-            pass
-    return None
+def load_cosme_info(csv_path):
+    info_map = {}
 
+    if not os.path.exists(csv_path):
+        print(f"❌ 파일을 찾을 수 없습니다: {csv_path}")
+        return info_map
 
-# =========================
-# Amazon CSV → 제품별 + 기간 필터
-# =========================
-def load_amazon_reviews_by_product(csv_path, days=None):
-    product_reviews = defaultdict(list)
-
-    if days is not None:
-        cutoff_date = datetime.today() - timedelta(days=days)
-    else:
-        cutoff_date = None
-
-    with open(csv_path, mode="r", encoding="utf-8-sig", errors="ignore") as f:
+    with open(csv_path, mode="r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            product = row.get("product_name", "").strip()
-            review = row.get("review_text", "").strip()
-            date_str = row.get("review_date", "").strip()
+            clean_row = {k.strip(): v.strip() for k, v in row.items()}
+            if "eng_name" in clean_row and "product_id" in clean_row:
+                key = clean_row["eng_name"].lower().replace(" ", "")
+                info_map[key] = clean_row["product_id"]
 
-            if not product or not review or not date_str:
-                continue
-
-            review_date = parse_amazon_date(date_str)
-            if not review_date:
-                continue
-
-            if cutoff_date and review_date < cutoff_date:
-                continue
-
-            product_reviews[product].append(review)
-
-    return product_reviews
+    return info_map
 
 
-def run_pipeline():
-    print("\n[리뷰 분석 시스템]")
-    print("1. Amazon (US)")
-    print("2. @COSME (JP)")
+# =========================
+# Amazon CSV 리뷰 로드
+# =========================
+def load_amazon_reviews_by_product(csv_path, target_key, days=None):
+    reviews = []
+
+    if not os.path.exists(csv_path):
+        print(f"❌ Amazon CSV 파일 없음: {csv_path}")
+        return reviews
+
+    # 🔥 인코딩 자동 대응
+    encodings = ["utf-8-sig", "cp949", "euc-kr"]
+
+    for enc in encodings:
+        try:
+            with open(csv_path, mode="r", encoding=enc) as f:
+                reader = csv.DictReader(f)
+
+                for row in reader:
+                    try:
+                        product_name = row["product_name"].strip().lower().replace(" ", "")
+                        review_text = row["review_text"].strip()
+                        review_date_str = row["review_date"].strip()
+                    except Exception:
+                        continue
+
+                    if product_name != target_key:
+                        continue
+
+                    # 날짜 파싱
+                    review_date = None
+                    for fmt in ("%Y-%m-%d", "%d-%b-%y", "%Y/%m/%d"):
+                        try:
+                            review_date = datetime.strptime(review_date_str, fmt)
+                            break
+                        except:
+                            pass
+
+                    if review_date is None:
+                        continue
+
+                    if days:
+                        if review_date < datetime.now() - timedelta(days=days):
+                            continue
+
+                    if review_text:
+                        reviews.append(review_text)
+
+            print(f"✅ Amazon CSV 로딩 성공 (encoding={enc})")
+            return reviews
+
+        except UnicodeDecodeError:
+            continue
+
+    print("❌ Amazon CSV 인코딩을 인식할 수 없습니다.")
+    return reviews
+
+
+
+# =========================
+# 메인 파이프라인
+# =========================
+def main():
+    reviews = []
+
+    print("=== 라네즈 통합 리뷰 분석 시스템 ===")
+    print("1. Amazon (CSV) | 2. @COSME (Crawling)")
     site_choice = input("사이트를 선택하세요 (1/2): ").strip()
 
     print("\n[기간 설정]")
     print("1. 7일 | 2. 30일 | 3. 90일 | 4. 180일 | 5. 전체")
     period_choice = input("번호를 입력하세요 (1~5): ").strip()
+    days = {"1": 7, "2": 30, "3": 90, "4": 180, "5": None}.get(period_choice, None)
 
-    mapping = {"1": 7, "2": 30, "3": 90, "4": 180, "5": None}
-    days = mapping.get(period_choice, None)
+    target_product_raw = input("\n분석할 제품명(영문)을 입력하세요: ").strip()
+    target_key = target_product_raw.lower().replace(" ", "")
+
+    # ⭐ 핵심: 항상 이 파일이 있는 폴더 기준
+    base_dir = os.path.dirname(os.path.abspath(__file__))
 
     # =========================
-    # Amazon (CSV 기반 + 기간 필터)
+    # Amazon
     # =========================
     if site_choice == "1":
-        print("\n📦 Amazon 리뷰 CSV 불러오는 중...")
-
-        base_dir = os.path.dirname(__file__)
+        source = "Amazon"
         csv_path = os.path.join(base_dir, "amazon_reviews.csv")
 
-        product_reviews = load_amazon_reviews_by_product(
+        reviews = load_amazon_reviews_by_product(
             csv_path,
+            target_key,
             days=days
         )
-        source = "Amazon"
 
     # =========================
     # @COSME
     # =========================
     elif site_choice == "2":
-        print("\n📦 @COSME 리뷰 크롤링 중...")
-        product_reviews = cosme_crawler.crawl_laneige_reviews(days=days)
         source = "@COSME"
+        csv_path = os.path.join(base_dir, "cosme_info.csv")
+
+        cosme_info = load_cosme_info(csv_path)
+        product_id = cosme_info.get(target_key)
+
+        if not product_id:
+            print(f"❌ cosme_info.csv에서 '{target_product_raw}'를 찾을 수 없습니다.")
+            print("등록된 제품:", list(cosme_info.keys()))
+            return
+
+        print(f"✅ 제품 ID {product_id} 확인됨. 크롤링 시작...")
+        reviews = cosme_crawler.crawl_by_id(product_id, days=days)
 
     else:
         print("❌ 잘못된 선택입니다.")
         return
 
-    if not product_reviews:
-        print("\n⚠️ 리뷰 데이터가 없습니다.")
+    # =========================
+    # 분석
+    # =========================
+    if not reviews:
+        print("\n❌ 분석할 리뷰 데이터가 없습니다.")
         return
 
-    print(f"\n✅ {source} 리뷰 수집 완료! 분석을 시작합니다.")
+    print(f"\n🚀 분석 시작... (총 {len(reviews)}건)")
+    result = analyze_reviews(target_product_raw, reviews, source)
 
-    for product_name, reviews in product_reviews.items():
-        print(f"\n🧬 분석 중: {product_name} ({len(reviews)}건)")
-        result = analyze_reviews(product_name, reviews, source)
-
-        print("-" * 50)
+    print("\n" + "=" * 60)
+    try:
         print(result)
-        print("-" * 50)
+    except UnicodeEncodeError:
+        print(result.encode("utf-8", errors="ignore").decode("utf-8"))
+    print("=" * 60)
 
 
 if __name__ == "__main__":
-    run_pipeline()
+    main()
