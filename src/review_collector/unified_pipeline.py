@@ -103,7 +103,7 @@ def main():
     target_product_raw = input("\n분석할 제품명(영문)을 입력하세요: ").strip()
     target_key = target_product_raw.lower().replace(" ", "")
 
-    # ⭐ 핵심: 항상 이 파일이 있는 폴더 기준
+    # 항상 이 파일이 있는 폴더 기준
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
     # =========================

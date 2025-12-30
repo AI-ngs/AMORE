@@ -48,7 +48,7 @@ def crawl_by_id(product_id, days=None, max_pages=5):
 
             for item in items:
                 try:
-                    # ✅ 날짜 (모바일 / PC 분기)
+                    # 날짜 (모바일 / PC 분기)
                     r_date = None
                     try:
                         date_text = item.find_element(
@@ -68,7 +68,7 @@ def crawl_by_id(product_id, days=None, max_pages=5):
                         if r_date < datetime.now() - timedelta(days=days):
                             return reviews
 
-                    # ✅ 리뷰 본문
+                    # 리뷰 본문
                     text = item.find_element(By.CSS_SELECTOR, "p.read").text.strip()
                     if text:
                         reviews.append(text)
