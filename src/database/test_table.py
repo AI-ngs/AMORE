@@ -20,11 +20,11 @@ for t in tables:
     print("-", t[0])
 
 # 데이터 확인
-df = pd.read_sql("SELECT * FROM cosme LIMIT 5", conn)
+df = pd.read_sql("SELECT * FROM amazon LIMIT 5", conn)
 print(df)
 
 df_count = pd.read_sql(
-    "SELECT COUNT(*) as cnt FROM cosme",
+    "SELECT COUNT(*) as cnt FROM amazon",
     conn
 )
 print(df_count)
